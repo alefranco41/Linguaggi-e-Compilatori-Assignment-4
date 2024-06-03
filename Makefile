@@ -11,7 +11,7 @@ all: optimize
 
 # Generare il codice intermedio IR senza ottimizzazioni
 generate_ir: $(C_FILE) 
-	clang -O0 -Xclang -disable-O0-optnone -fno-discard-value-names -emit-llvm -c $(C_FILE) -o $(BC_FILE)
+	clang -Xclang -disable-O0-optnone -fno-discard-value-names -emit-llvm -c $(C_FILE) -o $(BC_FILE)
 	llvm-dis $(BC_FILE) -o $(IR_FILE)
 
 # Eseguire il passo mem2reg
@@ -28,3 +28,5 @@ optimize: mem2reg
 clean:
 	rm -f test/*.ll
 	rm -f test/*.bc
+
+
