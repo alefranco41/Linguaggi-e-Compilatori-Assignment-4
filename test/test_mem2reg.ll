@@ -35,7 +35,7 @@ for.end:                                          ; preds = %for.cond
 
 for.cond6:                                        ; preds = %for.inc16, %for.end
   %i5.0 = phi i32 [ 0, %for.end ], [ %inc17, %for.inc16 ]
-  %cmp7 = icmp slt i32 %i5.0, %n
+  %cmp7 = icmp slt i32 %i5.0, 10
   br i1 %cmp7, label %for.body8, label %for.end18
 
 for.body8:                                        ; preds = %for.cond6

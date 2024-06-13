@@ -55,6 +55,7 @@ for.inc:                                          ; preds = %for.body
   br label %for.cond, !llvm.loop !6
 
 for.end:                                          ; preds = %for.cond
+  store i32 10, ptr %n.addr, align 4
   store i32 0, ptr %i5, align 4
   br label %for.cond6
 

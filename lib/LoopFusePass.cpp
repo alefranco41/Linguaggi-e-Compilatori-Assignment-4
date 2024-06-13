@@ -4,40 +4,6 @@ using namespace llvm;
 
 namespace {
 
-    void printLoopDebugInfo(Loop *L, StringRef LoopName) {
-        outs() << LoopName << " Header: ";
-        if (L->getHeader()) {
-            L->getHeader()->printAsOperand(outs(), false);
-        } else {
-            outs() << "NULL";
-        }
-        outs() << "\n";
-
-        outs() << LoopName << " Preheader: ";
-        if (L->getLoopPreheader()) {
-            L->getLoopPreheader()->printAsOperand(outs(), false);
-        } else {
-            outs() << "NULL";
-        }
-        outs() << "\n";
-
-        outs() << LoopName << " ExitingBlock: ";
-        if (L->getExitingBlock()) {
-            L->getExitingBlock()->printAsOperand(outs(), false);
-        } else {
-            outs() << "NULL";
-        }
-        outs() << "\n";
-
-        outs() << LoopName << " Latch: ";
-        if (L->getLoopLatch()) {
-            L->getLoopLatch()->printAsOperand(outs(), false);
-        } else {
-            outs() << "NULL";
-        }
-        outs() << "\n";
-    }
-
     void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, LoopInfo &LI, Function &F, DependenceInfo &DI, ScalarEvolution &SE) {
         BasicBlock *h1 = L1->getHeader();
         BasicBlock *l1 = L1->getLoopLatch();
@@ -86,9 +52,18 @@ namespace {
             BasicBlock *L2Preheader = L2->getLoopPreheader();
 
             if (L1ExitingBlock && L2Preheader && L1ExitingBlock == L2Preheader) {
-                outs() << "The exit block of L1 corresponds to the preheader of L2 \n";
-                return true;
+                int instructionCount = 0;
+                for (Instruction &I : *L1ExitingBlock) {
+                    ++instructionCount;
+                }
+                if (instructionCount == 1){
+                    outs() << "The exit block of L1 corresponds to the preheader of L2 \n";
+                    return true;
+                }
+                return false;
             }
+
+            
         } else {
             outs() << "One loop is guarded, the other one is not \n";
         }
