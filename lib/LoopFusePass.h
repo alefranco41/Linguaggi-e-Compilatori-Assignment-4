@@ -19,7 +19,7 @@
 #include "llvm/Transforms/Utils.h"
 #include "llvm/Transforms/Utils/CodeMoverUtils.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
-
+#include <vector>
 
 namespace llvm {
 

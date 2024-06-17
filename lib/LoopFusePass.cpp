@@ -55,6 +55,7 @@ namespace {
                 int instructionCount = 0;
                 for (Instruction &I : *L1ExitingBlock) {
                     ++instructionCount;
+                    outs() << "Found instruction " << I << " inside the preheader \n";
                 }
                 if (instructionCount == 1){
                     outs() << "The exit block of L1 corresponds to the preheader of L2 \n";
@@ -71,28 +72,119 @@ namespace {
         return false;
     }
 
-    bool hasNegativeDistanceDependence(DependenceInfo &DI, Loop *L1, Loop *L2, ScalarEvolution &SE) {
-        for (auto *BB1 : L1->blocks()) {
-            for (auto &I1 : *BB1) {
-                if (auto *LI1 = dyn_cast<LoadInst>(&I1)) {
-                    for (auto *BB2 : L2->blocks()) {
-                        for (auto &I2 : *BB2) {
-                            if (auto *SI2 = dyn_cast<StoreInst>(&I2)) {
-                                if (auto D = DI.depends(LI1, SI2, true)) {
-                                    for (unsigned Level = 1; Level <= D->getLevels(); ++Level) {
-                                        if (SE.isKnownNegative(D->getDistance(Level))) {
-                                            return true;
-                                        }
-                                    }
-                                }
+    /*bool positiveDistanceDependence(Loop *L0, Loop *L1, Instruction &I0, Instruction &I1, DominatorTree &DT, ScalarEvolution &SE) {
+        Value *Ptr0 = getLoadStorePointerOperand(&I0);
+        Value *Ptr1 = getLoadStorePointerOperand(&I1);
+        if (!Ptr0 || !Ptr1)
+            return false;
+    
+        const SCEV *SCEVPtr0 = SE.getSCEVAtScope(Ptr0, L0);
+        const SCEV *SCEVPtr1 = SE.getSCEVAtScope(Ptr1, L1);
+    
+        BasicBlock *L0Header = L0->getHeader();
+
+        auto HasNonLinearDominanceRelation = [&](const SCEV *S) {
+            const SCEVAddRecExpr *AddRec = dyn_cast<SCEVAddRecExpr>(S);
+            if (!AddRec)
+                return false;
+            return !DT.dominates(L0Header, AddRec->getLoop()->getHeader()) && !DT.dominates(AddRec->getLoop()->getHeader(), L0Header);
+        };
+
+        if (SCEVExprContains(SCEVPtr1, HasNonLinearDominanceRelation))
+            return false;
+    
+        ICmpInst::Predicate Pred = ICmpInst::ICMP_SGE;
+        bool IsAlwaysGE = SE.isKnownPredicate(Pred, SCEVPtr0, SCEVPtr1);
+
+        return IsAlwaysGE;
+    }
+
+
+    bool dependencesAllowFusion(Loop *L0, Loop *L1, DominatorTree &DT, ScalarEvolution &SE) {
+        std::vector<Instruction*> L0MemReads;
+        std::vector<Instruction*> L0MemWrites;
+
+        std::vector<Instruction*> L1MemReads;
+        std::vector<Instruction*> L1MemWrites;
+
+        for (BasicBlock *BB : L0->blocks()) {        
+            for (Instruction &I : *BB) {
+                if (I.mayWriteToMemory()){
+                    L0MemWrites.push_back(&I);
+                }
+    
+                if (I.mayReadFromMemory()){
+                    L0MemReads.push_back(&I);
+                }
+                
+            }
+        }
+
+        for (BasicBlock *BB : L1->blocks()) {        
+            for (Instruction &I : *BB) {
+                if (I.mayWriteToMemory()){
+                    L1MemWrites.push_back(&I);
+                }
+    
+                if (I.mayReadFromMemory()){
+                    L1MemReads.push_back(&I);
+                }
+                
+            }
+        }
+
+
+
+        for (Instruction *WriteL0 : L0MemWrites) {
+            for (Instruction *WriteL1 : L1MemWrites){
+                if (!positiveDistanceDependence(L0, L1, *WriteL0, *WriteL1, DT, SE)) {
+                    return false;
+                }
+            }
+                
+            for (Instruction *ReadL1 : L1MemReads){
+                if (!positiveDistanceDependence(L0, L1, *WriteL0, *ReadL1, DT, SE)) {
+                    return false;
+                }
+            }     
+        }
+    
+        for (Instruction *WriteL1 : L1MemWrites) {
+            for (Instruction *WriteL0 : L0MemWrites){
+                if (!positiveDistanceDependence(L0, L1, *WriteL0, *WriteL1, DT, SE)) {
+                    return false;
+                }
+            }
+        
+            for (Instruction *ReadL0 : L0MemReads){
+                if (!positiveDistanceDependence(L0, L1, *ReadL0, *WriteL1, DT, SE)) {
+                    return false;
+                }
+            }  
+        }
+            
+        return true;
+    }*/
+
+    bool areLoopsDependent(Loop *L0, Loop *L1, DependenceInfo &DI) {
+        if (L0 && L1) {
+            for (auto *B0 : L0->blocks()) {
+                for (auto &I0 : *B0) {
+                    for (auto *B1 : L1->blocks()) {
+                        for (auto &I1 : *B1) {
+                            auto dep = DI.depends(&I0, &I1, true);
+                            if (dep) {
+                                return true;
                             }
                         }
                     }
                 }
             }
         }
+
         return false;
     }
+
 
     void tryFuseLoops(Loop *L1, Loop *L2, ScalarEvolution &SE, DominatorTree &DT, PostDominatorTree &PDT, DependenceInfo &DI, LoopInfo &LI, Function &F) {
         if (!areLoopsAdjacent(L1, L2)) {
@@ -129,8 +221,8 @@ namespace {
         }
         outs() << "Loops are control flow equivalent \n";
 
-        if (hasNegativeDistanceDependence(DI, L1, L2, SE)) {
-            outs() << "Loops have negative distance dependences \n";
+        if (areLoopsDependent(L1,L2, DI)) {
+            outs() << "Loops are dependent \n";
             return;
         }
 
