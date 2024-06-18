@@ -14,6 +14,8 @@ entry:
   %m.addr = alloca i32, align 4
   %i = alloca i32, align 4
   %i1 = alloca i32, align 4
+  %i12 = alloca i32, align 4
+  %ciao = alloca i32, align 4
   store ptr %a, ptr %a.addr, align 8
   store ptr %b, ptr %b.addr, align 8
   store ptr %c, ptr %c.addr, align 8
@@ -73,6 +75,26 @@ for.inc9:                                         ; preds = %for.body4
   br label %for.cond2, !llvm.loop !8
 
 for.end11:                                        ; preds = %for.cond2
+  store i32 0, ptr %i12, align 4
+  br label %for.cond13
+
+for.cond13:                                       ; preds = %for.inc16, %for.end11
+  %13 = load i32, ptr %i12, align 4
+  %14 = load i32, ptr %n.addr, align 4
+  %cmp14 = icmp slt i32 %13, %14
+  br i1 %cmp14, label %for.body15, label %for.end18
+
+for.body15:                                       ; preds = %for.cond13
+  store i32 19, ptr %ciao, align 4
+  br label %for.inc16
+
+for.inc16:                                        ; preds = %for.body15
+  %15 = load i32, ptr %i12, align 4
+  %inc17 = add nsw i32 %15, 1
+  store i32 %inc17, ptr %i12, align 4
+  br label %for.cond13, !llvm.loop !9
+
+for.end18:                                        ; preds = %for.cond13
   ret void
 }
 
@@ -90,3 +112,4 @@ attributes #0 = { noinline nounwind uwtable "frame-pointer"="all" "min-legal-vec
 !6 = distinct !{!6, !7}
 !7 = !{!"llvm.loop.mustprogress"}
 !8 = distinct !{!8, !7}
+!9 = distinct !{!9, !7}

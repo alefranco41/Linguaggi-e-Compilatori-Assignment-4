@@ -45,6 +45,21 @@ for.inc9:                                         ; preds = %for.body4
   br label %for.cond2, !llvm.loop !8
 
 for.end11:                                        ; preds = %for.cond2
+  br label %for.cond13
+
+for.cond13:                                       ; preds = %for.inc16, %for.end11
+  %i12.0 = phi i32 [ 0, %for.end11 ], [ %inc17, %for.inc16 ]
+  %cmp14 = icmp slt i32 %i12.0, %n
+  br i1 %cmp14, label %for.body15, label %for.end18
+
+for.body15:                                       ; preds = %for.cond13
+  br label %for.inc16
+
+for.inc16:                                        ; preds = %for.body15
+  %inc17 = add nsw i32 %i12.0, 1
+  br label %for.cond13, !llvm.loop !9
+
+for.end18:                                        ; preds = %for.cond13
   ret void
 }
 
@@ -62,3 +77,4 @@ attributes #0 = { noinline nounwind uwtable "frame-pointer"="all" "min-legal-vec
 !6 = distinct !{!6, !7}
 !7 = !{!"llvm.loop.mustprogress"}
 !8 = distinct !{!8, !7}
+!9 = distinct !{!9, !7}

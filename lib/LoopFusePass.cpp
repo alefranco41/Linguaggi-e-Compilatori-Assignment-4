@@ -5,29 +5,72 @@ using namespace llvm;
 namespace {
 
     void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, LoopInfo &LI, Function &F, DependenceInfo &DI, ScalarEvolution &SE) {
-        BasicBlock *h1 = L1->getHeader();
-        BasicBlock *l1 = L1->getLoopLatch();
-        BasicBlock *b1 = L1->getBlocksVector()[1];
-        BasicBlock *e1 = L1->getExitBlock();
+        BasicBlock *l2_entry_block = L2->isGuarded() ? L2->getLoopGuardBranch()->getParent() : L2->getLoopPreheader(); 
+        SmallVector<BasicBlock*> exits_blocks;
+        
+        /*
+        Replace the uses of the induction variable of the second loop with 
+        the induction variable of the first loop.
+        */
+        PHINode *index1 = L1->getCanonicalInductionVariable();
+        PHINode *index2 = L2->getCanonicalInductionVariable();
+        if (!index1 || !index2)
+        {
+            outs() << "Induction variables are not canonical\n";
+            return;
+        }
+        index2->replaceAllUsesWith(index1);
 
-        BasicBlock *b2 = L2->getBlocksVector()[1];
-        BasicBlock *e2 = L2->getExitBlock();
+        /*
+        Data structure to get reference to the basic blocks that will undergo relocation.
+        */
+        struct LoopStructure
+        {
+            BasicBlock *header, *latch, *body_head, *body_tail;
 
-        PHINode* L1InductionVariable = L1->getInductionVariable(SE);
-        PHINode* L2InductionVariable = L2->getInductionVariable(SE);
-        if (L1InductionVariable && L2InductionVariable) {
-            L2->getInductionVariable(SE)->replaceAllUsesWith(L1->getInductionVariable(SE));
-        } else {
-            L2->getCanonicalInductionVariable()->replaceAllUsesWith(L1->getCanonicalInductionVariable());
+            LoopStructure (Loop *l)
+            {
+                this->header = l->getHeader();
+                this->latch = l->getLoopLatch();
+                this->body_head = getBodyHead(l, header);
+                this->body_tail = latch->getUniquePredecessor();
+            }
+
+            BasicBlock *getBodyHead (Loop *l, BasicBlock *header)
+            {
+                for (auto sit = succ_begin(header); sit != succ_end(header); sit++)
+                {
+                    BasicBlock *successor = dyn_cast<BasicBlock>(*sit);
+                    if (l->contains(successor))
+                        return successor;
+                }
+                return nullptr;
+            }
+        };
+        
+        LoopStructure *first_loop = new LoopStructure(L1);
+        LoopStructure *second_loop = new LoopStructure(L2);
+
+        L2->getExitBlocks(exits_blocks);
+        for (BasicBlock *BB : exits_blocks)
+        {
+            for (pred_iterator pit = pred_begin(BB); pit != pred_end(BB); pit++)
+            {
+                BasicBlock *predecessor = dyn_cast<BasicBlock>(*pit);
+                if (predecessor == L2->getHeader())
+                {
+                    L1->getHeader()->getTerminator()->replaceUsesOfWith(l2_entry_block, BB);
+                }
+            }
         }
 
-        l1->moveAfter(L2->getBlocksVector()[1]);
-        b1->getTerminator()->setSuccessor(0, L2->getBlocksVector()[1]);
-        L2->getBlocksVector()[1]->getTerminator()->setSuccessor(0, l1);
-        h1->getTerminator()->setSuccessor(1, e2);
-        e1 = e2;
-        b1 = b2;
-        EliminateUnreachableBlocks(F);
+        BranchInst *new_branch = BranchInst::Create(second_loop->latch);
+        ReplaceInstWithInst(second_loop->header->getTerminator(), new_branch);
+
+        first_loop->body_tail->getTerminator()->replaceUsesOfWith(first_loop->latch, second_loop->body_head);
+        second_loop->body_tail->getTerminator()->replaceUsesOfWith(second_loop->latch, first_loop->latch);
+
+        delete first_loop; delete second_loop;
     }
 
     bool areLoopsAdjacent(Loop *L1, Loop *L2) {
@@ -205,10 +248,10 @@ namespace {
     }
 
 
-    void tryFuseLoops(Loop *L1, Loop *L2, ScalarEvolution &SE, DominatorTree &DT, PostDominatorTree &PDT, DependenceInfo &DI, LoopInfo &LI, Function &F) {
+    bool tryFuseLoops(Loop *L1, Loop *L2, ScalarEvolution &SE, DominatorTree &DT, PostDominatorTree &PDT, DependenceInfo &DI, LoopInfo &LI, Function &F) {
         if (!areLoopsAdjacent(L1, L2)) {
             outs() << "Loops are not adjacent \n";
-            return;
+            return false;
         }
 
         outs() << "Loops are adjacent \n";
@@ -229,20 +272,20 @@ namespace {
         // Check if both trip counts are equal
         if (tripCountL1 != tripCountL2) {
             outs() << "Loops have a different trip count \n";
-            return;
+            return false;
         }
 
         outs() << "Loops have the same trip count \n";
 
         if (!(DT.dominates(L1->getHeader(), L2->getHeader()) && PDT.dominates(L2->getHeader(), L1->getHeader()))) {
             outs() << "Loops are not control flow equivalent \n";
-            return;
+            return false;
         }
         outs() << "Loops are control flow equivalent \n";
 
         if (!dependencesAllowFusion(L1,L2,DT,SE, DI)) {
             outs() << "Loops are dependent \n";
-            return;
+            return false;
         }
 
         outs() << "Loops don't have any negative distance dependences \n";
@@ -251,6 +294,7 @@ namespace {
         fuseLoops(L1, L2, DT, PDT, LI, F, DI, SE);
 
         outs() << "The code has been transformed. \n";
+        return true;
     }
 
     bool runOnFunction(Function &F, FunctionAnalysisManager &AM) {
@@ -261,17 +305,28 @@ namespace {
         DependenceInfo &DI = AM.getResult<DependenceAnalysis>(F);
         LoopInfo &LI = AM.getResult<LoopAnalysis>(F);
 
-        std::vector<Loop *> loops;
-        for (auto it = LI.rbegin(); it != LI.rend(); ++it) {
-            loops.push_back(*it);
+        while(true){
+            bool fused = false;
+            std::vector<Loop *> loops;
+            for (auto it = LI.rbegin(); it != LI.rend(); ++it) {
+                loops.push_back(*it);
+            }
+
+            outs() << "Found " << loops.size() << " loops! \n";
+
+            for (size_t i = 0; i < loops.size() - 1; ++i) {
+                if(tryFuseLoops(loops[i], loops[i + 1], SE, DT, PDT, DI, LI, F)){
+                    fused = true;
+                    LI.erase(loops[i+1]);
+                }
+            }
+
+            if(!fused){
+                break;
+            }
         }
 
-        outs() << "Found " << loops.size() << " loops! \n";
-
-        for (size_t i = 0; i < loops.size() - 1; ++i) {
-            tryFuseLoops(loops[i], loops[i + 1], SE, DT, PDT, DI, LI, F);
-        }
-
+    
         return false;
     }
 }
