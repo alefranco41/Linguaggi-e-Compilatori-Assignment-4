@@ -72,35 +72,82 @@ namespace {
         return false;
     }
 
-    /*bool positiveDistanceDependence(Loop *L0, Loop *L1, Instruction &I0, Instruction &I1, DominatorTree &DT, ScalarEvolution &SE) {
-        Value *Ptr0 = getLoadStorePointerOperand(&I0);
-        Value *Ptr1 = getLoadStorePointerOperand(&I1);
-        if (!Ptr0 || !Ptr1)
-            return false;
-    
-        const SCEV *SCEVPtr0 = SE.getSCEVAtScope(Ptr0, L0);
-        const SCEV *SCEVPtr1 = SE.getSCEVAtScope(Ptr1, L1);
-    
-        BasicBlock *L0Header = L0->getHeader();
 
-        auto HasNonLinearDominanceRelation = [&](const SCEV *S) {
-            const SCEVAddRecExpr *AddRec = dyn_cast<SCEVAddRecExpr>(S);
-            if (!AddRec)
+    // Returns a polynomial recurrence on the trip count of a load/store instruction
+    const SCEVAddRecExpr* getSCEVAddRec(Instruction *I, Loop *L, ScalarEvolution &SE) {
+        SmallPtrSet<const SCEVPredicate *, 4> preds;
+        const SCEV *Instruction_SCEV = SE.getSCEVAtScope(getLoadStorePointerOperand(I), L);
+        return SE.convertSCEVToAddRecWithPredicates(Instruction_SCEV, L, preds);
+    }
+
+    bool isDistanceNegative(Loop *loop1, Loop *loop2, Instruction *inst1, Instruction *inst2, ScalarEvolution &SE) {   
+        // Get polynomial recurrences for inst1 and inst2
+        const SCEVAddRecExpr *inst1_add_rec = getSCEVAddRec(inst1, loop1, SE);
+        const SCEVAddRecExpr *inst2_add_rec = getSCEVAddRec(inst2, loop2, SE);
+
+        // Check if both polynomial recurrences were found
+        if (!(inst1_add_rec && inst2_add_rec)) {
+            outs() << "Can't find a polynomial recurrence for inst!\n";
+            return true;
+        }
+
+        // Ensure both instructions share the same pointer base
+        if (SE.getPointerBase(inst1_add_rec) != SE.getPointerBase(inst2_add_rec)) {
+            outs() << "Can't analyze SCEV with different pointer base\n";
+            return false;
+        }
+
+        // Extract the start and stride of the polynomial recurrences
+        const SCEV* start_first_inst = inst1_add_rec->getStart();
+        const SCEV* start_second_inst = inst2_add_rec->getStart();
+        const SCEV* stride_first_inst = inst1_add_rec->getStepRecurrence(SE);
+        const SCEV* stride_second_inst = inst2_add_rec->getStepRecurrence(SE);
+
+        // Ensure the stride is non-zero and both strides are equal
+        if (!SE.isKnownNonZero(stride_first_inst) || stride_first_inst != stride_second_inst) {
+            outs() << "Cannot compute distance\n";
+            return true;
+        }
+
+        // Compute the distance (delta) between the start addresses
+        const SCEV *inst_delta = SE.getMinusSCEV(start_first_inst, start_second_inst);
+        const SCEV *dependence_dist = nullptr;
+        const SCEVConstant *const_delta = dyn_cast<SCEVConstant>(inst_delta);
+        const SCEVConstant *const_stride = dyn_cast<SCEVConstant>(stride_first_inst);
+
+        if (const_delta && const_stride) {
+            APInt int_stride = const_stride->getAPInt();
+            APInt int_delta = const_delta->getAPInt();
+            unsigned n_bits = int_stride.getBitWidth();
+            APInt int_zero = APInt(n_bits, 0);
+
+            // Check if the stride is zero (indicating a constant address)
+            if (int_stride == 0)
+                return true;
+
+            // Check if the delta is a multiple of the stride
+            if ((int_delta != 0 && int_delta.abs().urem(int_stride.abs()) != 0))
                 return false;
-            return !DT.dominates(L0Header, AddRec->getLoop()->getHeader()) && !DT.dominates(AddRec->getLoop()->getHeader(), L0Header);
-        };
 
-        if (SCEVExprContains(SCEVPtr1, HasNonLinearDominanceRelation))
-            return false;
-    
-        ICmpInst::Predicate Pred = ICmpInst::ICMP_SGE;
-        bool IsAlwaysGE = SE.isKnownPredicate(Pred, SCEVPtr0, SCEVPtr1);
+            // Reverse the delta if the stride is negative
+            bool reverse_delta = false;
+            if (int_stride.slt(int_zero))
+                reverse_delta = true;
 
-        return IsAlwaysGE;
+            dependence_dist = reverse_delta ? SE.getNegativeSCEV(inst_delta) : inst_delta;
+        } else {
+            outs() << "Cannot compute distance\n";
+            return true;
+        }
+
+        // Check if the dependence distance is negative
+        bool isDistanceNegative = SE.isKnownPredicate(ICmpInst::ICMP_SLT, dependence_dist, SE.getZero(stride_first_inst->getType()));
+
+        return isDistanceNegative;
     }
 
 
-    bool dependencesAllowFusion(Loop *L0, Loop *L1, DominatorTree &DT, ScalarEvolution &SE) {
+    bool dependencesAllowFusion(Loop *L0, Loop *L1, DominatorTree &DT, ScalarEvolution &SE, DependenceInfo &DI) {
         std::vector<Instruction*> L0MemReads;
         std::vector<Instruction*> L0MemWrites;
 
@@ -134,55 +181,27 @@ namespace {
         }
 
 
-
-        for (Instruction *WriteL0 : L0MemWrites) {
-            for (Instruction *WriteL1 : L1MemWrites){
-                if (!positiveDistanceDependence(L0, L1, *WriteL0, *WriteL1, DT, SE)) {
-                    return false;
-                }
-            }
-                
+        for (Instruction *WriteL0 : L0MemWrites) { 
             for (Instruction *ReadL1 : L1MemReads){
-                if (!positiveDistanceDependence(L0, L1, *WriteL0, *ReadL1, DT, SE)) {
-                    return false;
+                if(auto instruction_dependence = DI.depends(WriteL0, ReadL1, true)){
+                    if (isDistanceNegative(L0, L1, WriteL0, ReadL1, SE)) {
+                        return false;
+                    }
                 }
             }     
         }
     
-        for (Instruction *WriteL1 : L1MemWrites) {
-            for (Instruction *WriteL0 : L0MemWrites){
-                if (!positiveDistanceDependence(L0, L1, *WriteL0, *WriteL1, DT, SE)) {
-                    return false;
-                }
-            }
-        
+        for (Instruction *WriteL1 : L1MemWrites) {        
             for (Instruction *ReadL0 : L0MemReads){
-                if (!positiveDistanceDependence(L0, L1, *ReadL0, *WriteL1, DT, SE)) {
-                    return false;
+                if(auto instruction_dependence = DI.depends(WriteL1, ReadL0, true)){
+                    if (isDistanceNegative(L0, L1, ReadL0, WriteL1, SE)) {
+                        return false;
+                    }
                 }
             }  
         }
             
         return true;
-    }*/
-
-    bool areLoopsDependent(Loop *L0, Loop *L1, DependenceInfo &DI) {
-        if (L0 && L1) {
-            for (auto *B0 : L0->blocks()) {
-                for (auto &I0 : *B0) {
-                    for (auto *B1 : L1->blocks()) {
-                        for (auto &I1 : *B1) {
-                            auto dep = DI.depends(&I0, &I1, true);
-                            if (dep) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return false;
     }
 
 
@@ -221,7 +240,7 @@ namespace {
         }
         outs() << "Loops are control flow equivalent \n";
 
-        if (areLoopsDependent(L1,L2, DI)) {
+        if (!dependencesAllowFusion(L1,L2,DT,SE, DI)) {
             outs() << "Loops are dependent \n";
             return;
         }

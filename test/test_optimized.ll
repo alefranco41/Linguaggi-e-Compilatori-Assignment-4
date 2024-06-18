@@ -11,19 +11,28 @@ entry:
 for.cond:                                         ; preds = %for.inc, %entry
   %i.0 = phi i32 [ 0, %entry ], [ %inc, %for.inc ]
   %cmp = icmp slt i32 %i.0, %n
-  br i1 %cmp, label %for.body, label %for.end7
+  br i1 %cmp, label %for.body, label %for.end11
 
 for.body:                                         ; preds = %for.cond
+  %idxprom = sext i32 %i.0 to i64
+  %arrayidx = getelementptr inbounds i32, ptr %a, i64 %idxprom
+  store i32 0, ptr %arrayidx, align 4
   br label %for.body4
 
 for.body4:                                        ; preds = %for.body
+  %idxprom5 = sext i32 %i.0 to i64
+  %arrayidx6 = getelementptr inbounds i32, ptr %a, i64 %idxprom5
+  %0 = load i32, ptr %arrayidx6, align 4
+  %idxprom7 = sext i32 %i.0 to i64
+  %arrayidx8 = getelementptr inbounds i32, ptr %b, i64 %idxprom7
+  store i32 %0, ptr %arrayidx8, align 4
   br label %for.inc
 
 for.inc:                                          ; preds = %for.body4
   %inc = add nsw i32 %i.0, 1
   br label %for.cond, !llvm.loop !6
 
-for.end7:                                         ; preds = %for.cond
+for.end11:                                        ; preds = %for.cond
   ret void
 }
 

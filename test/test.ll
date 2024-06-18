@@ -13,9 +13,7 @@ entry:
   %n.addr = alloca i32, align 4
   %m.addr = alloca i32, align 4
   %i = alloca i32, align 4
-  %sasso = alloca i32, align 4
   %i1 = alloca i32, align 4
-  %pippo = alloca i32, align 4
   store ptr %a, ptr %a.addr, align 8
   store ptr %b, ptr %b.addr, align 8
   store ptr %c, ptr %c.addr, align 8
@@ -32,12 +30,16 @@ for.cond:                                         ; preds = %for.inc, %entry
   br i1 %cmp, label %for.body, label %for.end
 
 for.body:                                         ; preds = %for.cond
-  store i32 10, ptr %sasso, align 4
+  %2 = load ptr, ptr %a.addr, align 8
+  %3 = load i32, ptr %i, align 4
+  %idxprom = sext i32 %3 to i64
+  %arrayidx = getelementptr inbounds i32, ptr %2, i64 %idxprom
+  store i32 0, ptr %arrayidx, align 4
   br label %for.inc
 
 for.inc:                                          ; preds = %for.body
-  %2 = load i32, ptr %i, align 4
-  %inc = add nsw i32 %2, 1
+  %4 = load i32, ptr %i, align 4
+  %inc = add nsw i32 %4, 1
   store i32 %inc, ptr %i, align 4
   br label %for.cond, !llvm.loop !6
 
@@ -45,23 +47,32 @@ for.end:                                          ; preds = %for.cond
   store i32 0, ptr %i1, align 4
   br label %for.cond2
 
-for.cond2:                                        ; preds = %for.inc5, %for.end
-  %3 = load i32, ptr %i1, align 4
-  %4 = load i32, ptr %n.addr, align 4
-  %cmp3 = icmp slt i32 %3, %4
-  br i1 %cmp3, label %for.body4, label %for.end7
+for.cond2:                                        ; preds = %for.inc9, %for.end
+  %5 = load i32, ptr %i1, align 4
+  %6 = load i32, ptr %n.addr, align 4
+  %cmp3 = icmp slt i32 %5, %6
+  br i1 %cmp3, label %for.body4, label %for.end11
 
 for.body4:                                        ; preds = %for.cond2
-  store i32 20, ptr %pippo, align 4
-  br label %for.inc5
+  %7 = load ptr, ptr %a.addr, align 8
+  %8 = load i32, ptr %i1, align 4
+  %idxprom5 = sext i32 %8 to i64
+  %arrayidx6 = getelementptr inbounds i32, ptr %7, i64 %idxprom5
+  %9 = load i32, ptr %arrayidx6, align 4
+  %10 = load ptr, ptr %b.addr, align 8
+  %11 = load i32, ptr %i1, align 4
+  %idxprom7 = sext i32 %11 to i64
+  %arrayidx8 = getelementptr inbounds i32, ptr %10, i64 %idxprom7
+  store i32 %9, ptr %arrayidx8, align 4
+  br label %for.inc9
 
-for.inc5:                                         ; preds = %for.body4
-  %5 = load i32, ptr %i1, align 4
-  %inc6 = add nsw i32 %5, 1
-  store i32 %inc6, ptr %i1, align 4
+for.inc9:                                         ; preds = %for.body4
+  %12 = load i32, ptr %i1, align 4
+  %inc10 = add nsw i32 %12, 1
+  store i32 %inc10, ptr %i1, align 4
   br label %for.cond2, !llvm.loop !8
 
-for.end7:                                         ; preds = %for.cond2
+for.end11:                                        ; preds = %for.cond2
   ret void
 }
 

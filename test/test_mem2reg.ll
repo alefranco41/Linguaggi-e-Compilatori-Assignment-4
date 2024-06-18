@@ -14,6 +14,9 @@ for.cond:                                         ; preds = %for.inc, %entry
   br i1 %cmp, label %for.body, label %for.end
 
 for.body:                                         ; preds = %for.cond
+  %idxprom = sext i32 %i.0 to i64
+  %arrayidx = getelementptr inbounds i32, ptr %a, i64 %idxprom
+  store i32 0, ptr %arrayidx, align 4
   br label %for.inc
 
 for.inc:                                          ; preds = %for.body
@@ -23,19 +26,25 @@ for.inc:                                          ; preds = %for.body
 for.end:                                          ; preds = %for.cond
   br label %for.cond2
 
-for.cond2:                                        ; preds = %for.inc5, %for.end
-  %i1.0 = phi i32 [ 0, %for.end ], [ %inc6, %for.inc5 ]
+for.cond2:                                        ; preds = %for.inc9, %for.end
+  %i1.0 = phi i32 [ 0, %for.end ], [ %inc10, %for.inc9 ]
   %cmp3 = icmp slt i32 %i1.0, %n
-  br i1 %cmp3, label %for.body4, label %for.end7
+  br i1 %cmp3, label %for.body4, label %for.end11
 
 for.body4:                                        ; preds = %for.cond2
-  br label %for.inc5
+  %idxprom5 = sext i32 %i1.0 to i64
+  %arrayidx6 = getelementptr inbounds i32, ptr %a, i64 %idxprom5
+  %0 = load i32, ptr %arrayidx6, align 4
+  %idxprom7 = sext i32 %i1.0 to i64
+  %arrayidx8 = getelementptr inbounds i32, ptr %b, i64 %idxprom7
+  store i32 %0, ptr %arrayidx8, align 4
+  br label %for.inc9
 
-for.inc5:                                         ; preds = %for.body4
-  %inc6 = add nsw i32 %i1.0, 1
+for.inc9:                                         ; preds = %for.body4
+  %inc10 = add nsw i32 %i1.0, 1
   br label %for.cond2, !llvm.loop !8
 
-for.end7:                                         ; preds = %for.cond2
+for.end11:                                        ; preds = %for.cond2
   ret void
 }
 
