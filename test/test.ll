@@ -15,7 +15,7 @@ entry:
   %i = alloca i32, align 4
   %i1 = alloca i32, align 4
   %i12 = alloca i32, align 4
-  %ciao = alloca i32, align 4
+  %pippo = alloca i32, align 4
   store ptr %a, ptr %a.addr, align 8
   store ptr %b, ptr %b.addr, align 8
   store ptr %c, ptr %c.addr, align 8
@@ -85,7 +85,7 @@ for.cond13:                                       ; preds = %for.inc16, %for.end
   br i1 %cmp14, label %for.body15, label %for.end18
 
 for.body15:                                       ; preds = %for.cond13
-  store i32 19, ptr %ciao, align 4
+  store i32 10, ptr %pippo, align 4
   br label %for.inc16
 
 for.inc16:                                        ; preds = %for.body15

@@ -4,8 +4,8 @@ using namespace llvm;
 
 namespace {
 
-    void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, LoopInfo &LI, Function &F, DependenceInfo &DI, ScalarEvolution &SE) {
-        BasicBlock *l2_entry_block = L2->isGuarded() ? L2->getLoopGuardBranch()->getParent() : L2->getLoopPreheader(); 
+    void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, LoopInfo &LI, Function &F, DependenceInfo &DI, ScalarEvolution &SE, FunctionAnalysisManager &AM) {
+        BasicBlock *l2_entry_block = L2->isGuarded() ? L2->getLoopGuardBranch()->getParent() : L2->getLoopPreheader();
         SmallVector<BasicBlock*> exits_blocks;
         
         /*
@@ -22,34 +22,42 @@ namespace {
         index2->replaceAllUsesWith(index1);
 
         /*
-        Data structure to get reference to the basic blocks that will undergo relocation.
+        Get references to the basic blocks of the loops.
         */
-        struct LoopStructure
+        BasicBlock *header1 = L1->getHeader();
+        BasicBlock *latch1 = L1->getLoopLatch();
+        BasicBlock *header2 = L2->getHeader();
+        BasicBlock *latch2 = L2->getLoopLatch();
+
+        BasicBlock *body_head1 = nullptr;
+        BasicBlock *body_tail1 = latch1->getUniquePredecessor();
+        for (auto sit = succ_begin(header1); sit != succ_end(header1); sit++)
         {
-            BasicBlock *header, *latch, *body_head, *body_tail;
-
-            LoopStructure (Loop *l)
+            BasicBlock *successor = dyn_cast<BasicBlock>(*sit);
+            if (L1->contains(successor))
             {
-                this->header = l->getHeader();
-                this->latch = l->getLoopLatch();
-                this->body_head = getBodyHead(l, header);
-                this->body_tail = latch->getUniquePredecessor();
+                body_head1 = successor;
+                break;
             }
+        }
 
-            BasicBlock *getBodyHead (Loop *l, BasicBlock *header)
+        BasicBlock *body_head2 = nullptr;
+        BasicBlock *body_tail2 = latch2->getUniquePredecessor();
+        for (auto sit = succ_begin(header2); sit != succ_end(header2); sit++)
+        {
+            BasicBlock *successor = dyn_cast<BasicBlock>(*sit);
+            if (L2->contains(successor))
             {
-                for (auto sit = succ_begin(header); sit != succ_end(header); sit++)
-                {
-                    BasicBlock *successor = dyn_cast<BasicBlock>(*sit);
-                    if (l->contains(successor))
-                        return successor;
-                }
-                return nullptr;
+                body_head2 = successor;
+                break;
             }
-        };
-        
-        LoopStructure *first_loop = new LoopStructure(L1);
-        LoopStructure *second_loop = new LoopStructure(L2);
+        }
+
+        if (!body_head1 || !body_tail1 || !body_head2 || !body_tail2)
+        {
+            outs() << "Failed to locate loop body blocks\n";
+            return;
+        }
 
         L2->getExitBlocks(exits_blocks);
         for (BasicBlock *BB : exits_blocks)
@@ -57,20 +65,23 @@ namespace {
             for (pred_iterator pit = pred_begin(BB); pit != pred_end(BB); pit++)
             {
                 BasicBlock *predecessor = dyn_cast<BasicBlock>(*pit);
-                if (predecessor == L2->getHeader())
+                if (predecessor == header2)
                 {
-                    L1->getHeader()->getTerminator()->replaceUsesOfWith(l2_entry_block, BB);
+                    header1->getTerminator()->replaceUsesOfWith(l2_entry_block, BB);
                 }
             }
         }
 
-        BranchInst *new_branch = BranchInst::Create(second_loop->latch);
-        ReplaceInstWithInst(second_loop->header->getTerminator(), new_branch);
+        BranchInst *new_branch = BranchInst::Create(latch2);
+        ReplaceInstWithInst(header2->getTerminator(), new_branch);
 
-        first_loop->body_tail->getTerminator()->replaceUsesOfWith(first_loop->latch, second_loop->body_head);
-        second_loop->body_tail->getTerminator()->replaceUsesOfWith(second_loop->latch, first_loop->latch);
+        body_tail1->getTerminator()->replaceUsesOfWith(latch1, body_head2);
+        body_tail2->getTerminator()->replaceUsesOfWith(latch2, latch1);
 
-        delete first_loop; delete second_loop;
+        
+        EliminateUnreachableBlocks(F);
+        /*LoopSimplifyPass simplifyPass;
+        simplifyPass.run(F, AM);*/
     }
 
     bool areLoopsAdjacent(Loop *L1, Loop *L2) {
@@ -248,7 +259,7 @@ namespace {
     }
 
 
-    bool tryFuseLoops(Loop *L1, Loop *L2, ScalarEvolution &SE, DominatorTree &DT, PostDominatorTree &PDT, DependenceInfo &DI, LoopInfo &LI, Function &F) {
+    bool tryFuseLoops(Loop *L1, Loop *L2, ScalarEvolution &SE, DominatorTree &DT, PostDominatorTree &PDT, DependenceInfo &DI, LoopInfo &LI, Function &F, FunctionAnalysisManager &AM) {
         if (!areLoopsAdjacent(L1, L2)) {
             outs() << "Loops are not adjacent \n";
             return false;
@@ -291,7 +302,7 @@ namespace {
         outs() << "Loops don't have any negative distance dependences \n";
         outs() << "All Loop Fusion conditions satisfied. \n";
 
-        fuseLoops(L1, L2, DT, PDT, LI, F, DI, SE);
+        fuseLoops(L1, L2, DT, PDT, LI, F, DI, SE, AM);
 
         outs() << "The code has been transformed. \n";
         return true;
@@ -315,7 +326,7 @@ namespace {
             outs() << "Found " << loops.size() << " loops! \n";
 
             for (size_t i = 0; i < loops.size() - 1; ++i) {
-                if(tryFuseLoops(loops[i], loops[i + 1], SE, DT, PDT, DI, LI, F)){
+                if(tryFuseLoops(loops[i], loops[i + 1], SE, DT, PDT, DI, LI, F, AM)){
                     fused = true;
                     LI.erase(loops[i+1]);
                 }
