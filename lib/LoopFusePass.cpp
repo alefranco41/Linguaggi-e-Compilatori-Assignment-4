@@ -5,7 +5,7 @@ using namespace llvm;
 namespace {
 
     void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, LoopInfo &LI, Function &F, DependenceInfo &DI, ScalarEvolution &SE, FunctionAnalysisManager &AM) {
-        BasicBlock *l2_entry_block = L2->isGuarded() ? L2->getLoopGuardBranch()->getParent() : L2->getLoopPreheader();
+        BasicBlock *l2_entry_block =  L2->getLoopPreheader();
         SmallVector<BasicBlock*> exits_blocks;
         
         /*
@@ -14,14 +14,17 @@ namespace {
         */
         PHINode *index1 = L1->getCanonicalInductionVariable();
         PHINode *index2 = L2->getCanonicalInductionVariable();
+
         if (!index1 || !index2)
         {
             outs() << "Induction variables are not canonical\n";
             return;
         }
-        index2->replaceAllUsesWith(index1);
 
-        /*
+        index2->replaceAllUsesWith(index1);
+        index2->eraseFromParent();
+        
+        /*  
         Get references to the basic blocks of the loops.
         */
         BasicBlock *header1 = L1->getHeader();
@@ -71,17 +74,13 @@ namespace {
                 }
             }
         }
-
-        BranchInst *new_branch = BranchInst::Create(latch2);
-        ReplaceInstWithInst(header2->getTerminator(), new_branch);
-
+    
+        BranchInst *new_branch = BranchInst::Create(body_tail2);
+        ReplaceInstWithInst(header1->getTerminator(), new_branch);
         body_tail1->getTerminator()->replaceUsesOfWith(latch1, body_head2);
         body_tail2->getTerminator()->replaceUsesOfWith(latch2, latch1);
-
-        
         EliminateUnreachableBlocks(F);
-        /*LoopSimplifyPass simplifyPass;
-        simplifyPass.run(F, AM);*/
+        outs() << "Deleted unreachable blocks\n";
     }
 
     bool areLoopsAdjacent(Loop *L1, Loop *L2) {
@@ -90,17 +89,16 @@ namespace {
             return false;
         }
 
-        if (BranchInst *L1Guard = L1->getLoopGuardBranch()) {
-            if (L2->getLoopGuardBranch()) {
-                outs() << "L1 and L2 are guarded loops \n";
-                for (unsigned i = 0; i < L1Guard->getNumSuccessors(); ++i) {
-                    if (!L1->contains(L1Guard->getSuccessor(i)) && L1Guard->getSuccessor(i) == L2->getHeader()) {
-                        outs() << "The non-loop successor of the guard branch of L1 corresponds to L2's entry block \n";
-                        return true;
-                    }
+        if (L1->isGuarded() && L2->isGuarded()) {
+            BranchInst *L1Guard = L1->getLoopGuardBranch();
+            outs() << "L1 and L2 are guarded loops \n";
+            for (unsigned i = 0; i < L1Guard->getNumSuccessors(); ++i) {
+                if (!L1->contains(L1Guard->getSuccessor(i)) && L1Guard->getSuccessor(i) == L2->getHeader()) {
+                    outs() << "The non-loop successor of the guard branch of L1 corresponds to L2's entry block \n";
+                    return true;
                 }
             }
-        } else if (!L1->getLoopGuardBranch() && !L2->getLoopGuardBranch()) {
+        } else if (!L1->isGuarded() && !L2->isGuarded()) {
             outs() << "L1 and L2 are unguarded loops \n";
             BasicBlock *L1ExitingBlock = L1->getExitBlock();
             BasicBlock *L2Preheader = L2->getLoopPreheader();
