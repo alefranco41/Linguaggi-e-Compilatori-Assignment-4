@@ -11,7 +11,7 @@ entry:
 for.cond:                                         ; preds = %for.inc, %entry
   %i.0 = phi i32 [ 0, %entry ], [ %inc, %for.inc ]
   %cmp = icmp slt i32 %i.0, %n
-  br i1 %cmp, label %for.body, label %for.end11
+  br i1 %cmp, label %for.body, label %for.end22
 
 for.body:                                         ; preds = %for.cond
   %idxprom = sext i32 %i.0 to i64
@@ -19,7 +19,7 @@ for.body:                                         ; preds = %for.cond
   store i32 0, ptr %arrayidx, align 4
   br label %for.body4
 
-for.inc:                                          ; preds = %for.body4
+for.inc:                                          ; preds = %for.body15
   %inc = add nsw i32 %i.0, 1
   br label %for.cond, !llvm.loop !6
 
@@ -30,9 +30,18 @@ for.body4:                                        ; preds = %for.body
   %idxprom7 = sext i32 %i.0 to i64
   %arrayidx8 = getelementptr inbounds i32, ptr %b, i64 %idxprom7
   store i32 %0, ptr %arrayidx8, align 4
+  br label %for.body15
+
+for.body15:                                       ; preds = %for.body4
+  %idxprom16 = sext i32 %i.0 to i64
+  %arrayidx17 = getelementptr inbounds i32, ptr %b, i64 %idxprom16
+  %1 = load i32, ptr %arrayidx17, align 4
+  %idxprom18 = sext i32 %i.0 to i64
+  %arrayidx19 = getelementptr inbounds i32, ptr %c, i64 %idxprom18
+  store i32 %1, ptr %arrayidx19, align 4
   br label %for.inc
 
-for.end11:                                        ; preds = %for.cond
+for.end22:                                        ; preds = %for.cond
   ret void
 }
 

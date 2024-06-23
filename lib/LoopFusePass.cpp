@@ -3,6 +3,12 @@
 using namespace llvm;
 
 namespace {
+    
+    struct fusionCandidate{
+        const SCEV *tripCount;
+        Loop* loop;
+    };
+
 
     void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, LoopInfo &LI, Function &F, DependenceInfo &DI, ScalarEvolution &SE, FunctionAnalysisManager &AM) {
         BasicBlock *l2_entry_block =  L2->getLoopPreheader();
@@ -62,6 +68,7 @@ namespace {
             return;
         }
 
+
         L2->getExitBlocks(exits_blocks);
         for (BasicBlock *BB : exits_blocks)
         {
@@ -80,10 +87,6 @@ namespace {
             if (BI->isConditional() && BI->getSuccessor(0) == header1) {
                 BranchInst *new_branch1 = BranchInst::Create(body_tail2);
                 ReplaceInstWithInst(header1->getTerminator(), new_branch1);
-
-                /*BranchInst *new_branch2 = BranchInst::Create(body_head2->getTerminator()->getSuccessor(1));
-                ReplaceInstWithInst(l2_entry_block->getTerminator(), new_branch2);*/
-
 
                 body_head1->getTerminator()->replaceUsesOfWith(body_head1->getTerminator()->getSuccessor(1),body_head2->getTerminator()->getSuccessor(1));
             }
@@ -156,14 +159,34 @@ namespace {
             outs() << "L1 and L2 are unguarded loops \n";
             BasicBlock *L1ExitingBlock = L1->getExitBlock();
             BasicBlock *L2Preheader = L2->getLoopPreheader();
+
+            if(!L2Preheader){
+                outs() << "L2 has a NULL Preheader! \n";
+                return false;
+            } 
             
+            outs() << "L2Preheader: ";
+            L2Preheader->print(outs());
+            outs() << "\n";
+
+
+            if(!L1ExitingBlock){
+                SmallVector<BasicBlock*> exits_blocks;
+                L1->getExitBlocks(exits_blocks);
+                for (BasicBlock *BB : exits_blocks){
+                    if(BB == L2Preheader){
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+
             outs() << "L1ExitingBlock: ";
             L1ExitingBlock->print(outs());
             outs() << "\n";
 
-            outs() << "L2Preheader: ";
-            L2Preheader->print(outs());
-            outs() << "\n";
 
             if (L1ExitingBlock && L2Preheader && L1ExitingBlock == L2Preheader) {
                 int instructionCount = 0;
@@ -319,7 +342,11 @@ namespace {
     }
 
 
-    bool tryFuseLoops(Loop *L1, Loop *L2, ScalarEvolution &SE, DominatorTree &DT, PostDominatorTree &PDT, DependenceInfo &DI, LoopInfo &LI, Function &F, FunctionAnalysisManager &AM) {
+    bool tryFuseLoops(fusionCandidate *C1, fusionCandidate *C2, ScalarEvolution &SE, DominatorTree &DT, PostDominatorTree &PDT, DependenceInfo &DI, LoopInfo &LI, Function &F, FunctionAnalysisManager &AM) {
+        
+        Loop* L1 = C1->loop;
+        Loop* L2 = C2->loop;
+
         if (!areLoopsAdjacent(L1, L2)) {
             outs() << "Loops are not adjacent \n";
             return false;
@@ -328,20 +355,28 @@ namespace {
         outs() << "Loops are adjacent \n";
 
         // Get the trip counts using getExitCount
-        const SCEV *tripCountL1 = SE.getExitCount(L1, L1->getExitingBlock(), ScalarEvolution::ExitCountKind::Exact);
-        const SCEV *tripCountL2 = SE.getExitCount(L2, L2->getExitingBlock(), ScalarEvolution::ExitCountKind::Exact);
+        if(!C1->tripCount){
+            const SCEV *tripCountL1 = SE.getExitCount(L1, L1->getExitingBlock(), ScalarEvolution::ExitCountKind::Exact);
+            C1->tripCount = tripCountL1;
+        }
+        
+        if(!C2->tripCount){
+            const SCEV *tripCountL2 = SE.getExitCount(L2, L2->getExitingBlock(), ScalarEvolution::ExitCountKind::Exact);
+            C2->tripCount = tripCountL2;
+        }
+        
 
         // Print the trip counts
         outs() << "Trip count of L1: ";
-        tripCountL1->print(outs());
+        C1->tripCount->print(outs());
         outs() << "\n";
 
         outs() << "Trip count of L2: ";
-        tripCountL2->print(outs());
+        C2->tripCount->print(outs());
         outs() << "\n";
 
         // Check if both trip counts are equal
-        if (tripCountL1 != tripCountL2) {
+        if (C1->tripCount != C2->tripCount) {
             outs() << "Loops have a different trip count \n";
             return false;
         }
@@ -377,35 +412,45 @@ namespace {
         LoopInfo &LI = AM.getResult<LoopAnalysis>(F);
         
 
-        
-        while(true){
-            bool fused = false;
-            Loop* secondLoop = nullptr;
+        std::vector<fusionCandidate*> loops;
+        for (auto it = LI.rbegin(); it != LI.rend(); ++it) {
+            fusionCandidate* f = new fusionCandidate;
+            f->tripCount = nullptr;
+            f->loop = *it;
+            loops.push_back(f);
+        }
 
-            std::vector<Loop *> loops;
-            for (auto it = LI.rbegin(); it != LI.rend(); ++it) {
-                loops.push_back(*it);
-            }
+        while(true) {
+            bool fused = false;
+            fusionCandidate* secondLoop = nullptr;
 
             outs() << "Found " << loops.size() << " loops! \n";
 
             for (size_t i = 0; i < loops.size() - 1; ++i) {
-                if(tryFuseLoops(loops[i], loops[i + 1], SE, DT, PDT, DI, LI, F, AM)){
+                if(tryFuseLoops(loops[i], loops[i + 1], SE, DT, PDT, DI, LI, F, AM)) {
                     fused = true;
                     secondLoop = loops[i + 1];
                     break;
                 }
             }
-            
-            
-            if(fused){
-                LI.erase(secondLoop);
-            }else{
+
+            if(fused && secondLoop) {
+                // Remove the loop from LoopInfo
+                LI.erase(secondLoop->loop);
+
+                // Remove the loop from the vector and free memory
+                auto it = std::remove_if(loops.begin(), loops.end(), [secondLoop](fusionCandidate* candidate) {
+                    if (candidate == secondLoop) {
+                        delete candidate; // Free memory
+                        return true; // Remove from vector
+                    }
+                    return false;
+                });
+                loops.erase(it, loops.end());
+            } else {
                 break;
             }
         }
-
-    
         return false;
     }
 }

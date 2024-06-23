@@ -12,4 +12,10 @@ void f(int *a, int *b, int *c, int *d, int n, int m) {
     b[i] = a[i];
     i++;
   }while(i<n);
+
+  i = 0;
+  do{
+    c[i] = b[i];
+    i++;
+  }while(i<n);
 }

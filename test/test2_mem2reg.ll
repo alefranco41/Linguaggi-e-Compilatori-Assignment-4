@@ -45,6 +45,27 @@ for.inc9:                                         ; preds = %for.body4
   br label %for.cond2, !llvm.loop !8
 
 for.end11:                                        ; preds = %for.cond2
+  br label %for.cond13
+
+for.cond13:                                       ; preds = %for.inc20, %for.end11
+  %i12.0 = phi i32 [ 0, %for.end11 ], [ %inc21, %for.inc20 ]
+  %cmp14 = icmp slt i32 %i12.0, %n
+  br i1 %cmp14, label %for.body15, label %for.end22
+
+for.body15:                                       ; preds = %for.cond13
+  %idxprom16 = sext i32 %i12.0 to i64
+  %arrayidx17 = getelementptr inbounds i32, ptr %b, i64 %idxprom16
+  %1 = load i32, ptr %arrayidx17, align 4
+  %idxprom18 = sext i32 %i12.0 to i64
+  %arrayidx19 = getelementptr inbounds i32, ptr %c, i64 %idxprom18
+  store i32 %1, ptr %arrayidx19, align 4
+  br label %for.inc20
+
+for.inc20:                                        ; preds = %for.body15
+  %inc21 = add nsw i32 %i12.0, 1
+  br label %for.cond13, !llvm.loop !9
+
+for.end22:                                        ; preds = %for.cond13
   ret void
 }
 
@@ -62,3 +83,4 @@ attributes #0 = { noinline nounwind uwtable "frame-pointer"="all" "min-legal-vec
 !6 = distinct !{!6, !7}
 !7 = !{!"llvm.loop.mustprogress"}
 !8 = distinct !{!8, !7}
+!9 = distinct !{!9, !7}

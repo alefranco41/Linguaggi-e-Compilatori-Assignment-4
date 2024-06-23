@@ -31,6 +31,23 @@ do.body1:                                         ; preds = %do.body
   br label %do.cond
 
 do.end9:                                          ; preds = %do.cond
+  br label %do.body10
+
+do.body10:                                        ; preds = %do.cond16, %do.end9
+  %idxprom11 = sext i32 %i.0 to i64
+  %arrayidx12 = getelementptr inbounds i32, ptr %b, i64 %idxprom11
+  %1 = load i32, ptr %arrayidx12, align 4
+  %idxprom13 = sext i32 %i.0 to i64
+  %arrayidx14 = getelementptr inbounds i32, ptr %c, i64 %idxprom13
+  store i32 %1, ptr %arrayidx14, align 4
+  %inc15 = add nsw i32 %i.0, 1
+  br label %do.cond16
+
+do.cond16:                                        ; preds = %do.body10
+  %cmp17 = icmp slt i32 %inc15, %n
+  br i1 %cmp17, label %do.body10, label %do.end18, !llvm.loop !8
+
+do.end18:                                         ; preds = %do.cond16
   ret void
 }
 
@@ -47,3 +64,4 @@ attributes #0 = { noinline nounwind uwtable "frame-pointer"="all" "min-legal-vec
 !5 = !{!"clang version 17.0.6"}
 !6 = distinct !{!6, !7}
 !7 = !{!"llvm.loop.mustprogress"}
+!8 = distinct !{!8, !7}
