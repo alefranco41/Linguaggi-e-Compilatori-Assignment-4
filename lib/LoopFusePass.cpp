@@ -7,7 +7,6 @@ namespace {
     void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, LoopInfo &LI, Function &F, DependenceInfo &DI, ScalarEvolution &SE, FunctionAnalysisManager &AM) {
         BasicBlock *l2_entry_block =  L2->getLoopPreheader();
         SmallVector<BasicBlock*> exits_blocks;
-        
         /*
         Replace the uses of the induction variable of the second loop with 
         the induction variable of the first loop.
@@ -23,6 +22,7 @@ namespace {
 
         index2->replaceAllUsesWith(index1);
         index2->eraseFromParent();
+
         
         /*  
         Get references to the basic blocks of the loops.
@@ -74,12 +74,66 @@ namespace {
                 }
             }
         }
-    
-        BranchInst *new_branch = BranchInst::Create(body_tail2);
-        ReplaceInstWithInst(header1->getTerminator(), new_branch);
+
+
+        if (BranchInst *BI = dyn_cast<BranchInst>(latch1->getTerminator())) {
+            if (BI->isConditional() && BI->getSuccessor(0) == header1) {
+                BranchInst *new_branch1 = BranchInst::Create(body_tail2);
+                ReplaceInstWithInst(header1->getTerminator(), new_branch1);
+
+                /*BranchInst *new_branch2 = BranchInst::Create(body_head2->getTerminator()->getSuccessor(1));
+                ReplaceInstWithInst(l2_entry_block->getTerminator(), new_branch2);*/
+
+
+                body_head1->getTerminator()->replaceUsesOfWith(body_head1->getTerminator()->getSuccessor(1),body_head2->getTerminator()->getSuccessor(1));
+            }
+        }
+
+
         body_tail1->getTerminator()->replaceUsesOfWith(latch1, body_head2);
         body_tail2->getTerminator()->replaceUsesOfWith(latch2, latch1);
+
+        outs() << "L1 header: ";
+        header1->print(outs());
+        outs() << "\n";
+
+        outs() << "L2 header: ";
+        header2->print(outs());
+        outs() << "\n";
+
+        outs() << "L1 latch: ";
+        latch1->print(outs());
+        outs() << "\n";
+        
+        outs() << "L2 latch: ";
+        latch2->print(outs());
+        outs() << "\n";
+
+        outs() << "L1 body head: ";
+        body_head1->print(outs());
+        outs() << "\n";
+
+        outs() << "L2 body head: ";
+        body_head2->print(outs());
+        outs() << "\n";
+
+        outs() << "L1 body tail: ";
+        body_tail1->print(outs());
+        outs() << "\n";
+
+        outs() << "L2 body tail: ";
+        body_tail2->print(outs());
+        outs() << "\n";
+
+
+        outs()<<"L1 Header terminator: "<< *header1->getTerminator()<<"\n";
+        outs()<<"L2 Header terminator: "<< *header2->getTerminator()<<"\n";
+        
+
+        
         EliminateUnreachableBlocks(F);
+
+        
         outs() << "Deleted unreachable blocks\n";
     }
 
@@ -102,6 +156,14 @@ namespace {
             outs() << "L1 and L2 are unguarded loops \n";
             BasicBlock *L1ExitingBlock = L1->getExitBlock();
             BasicBlock *L2Preheader = L2->getLoopPreheader();
+            
+            outs() << "L1ExitingBlock: ";
+            L1ExitingBlock->print(outs());
+            outs() << "\n";
+
+            outs() << "L2Preheader: ";
+            L2Preheader->print(outs());
+            outs() << "\n";
 
             if (L1ExitingBlock && L2Preheader && L1ExitingBlock == L2Preheader) {
                 int instructionCount = 0;
@@ -313,9 +375,13 @@ namespace {
         PostDominatorTree &PDT = AM.getResult<PostDominatorTreeAnalysis>(F);
         DependenceInfo &DI = AM.getResult<DependenceAnalysis>(F);
         LoopInfo &LI = AM.getResult<LoopAnalysis>(F);
+        
 
+        
         while(true){
             bool fused = false;
+            Loop* secondLoop = nullptr;
+
             std::vector<Loop *> loops;
             for (auto it = LI.rbegin(); it != LI.rend(); ++it) {
                 loops.push_back(*it);
@@ -326,11 +392,15 @@ namespace {
             for (size_t i = 0; i < loops.size() - 1; ++i) {
                 if(tryFuseLoops(loops[i], loops[i + 1], SE, DT, PDT, DI, LI, F, AM)){
                     fused = true;
-                    LI.erase(loops[i+1]);
+                    secondLoop = loops[i + 1];
+                    break;
                 }
             }
-
-            if(!fused){
+            
+            
+            if(fused){
+                LI.erase(secondLoop);
+            }else{
                 break;
             }
         }
