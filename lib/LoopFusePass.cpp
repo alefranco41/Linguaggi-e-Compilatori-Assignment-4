@@ -82,20 +82,21 @@ namespace {
             }
         }
 
-
-        if (BranchInst *BI = dyn_cast<BranchInst>(latch1->getTerminator())) {
-            if (BI->isConditional() && BI->getSuccessor(0) == header1) {
-                BranchInst *new_branch1 = BranchInst::Create(body_tail2);
-                ReplaceInstWithInst(header1->getTerminator(), new_branch1);
-
-                body_head1->getTerminator()->replaceUsesOfWith(body_head1->getTerminator()->getSuccessor(1),body_head2->getTerminator()->getSuccessor(1));
-            }
+        
+        
+        if (latch1->getTerminator()->getNumSuccessors() == 2) {
+            //unguarded. es:  br i1 %cmp, label %do.body, label %do.end9
+            outs() << "ciao" << "\n";
+            BranchInst *new_branch1 = BranchInst::Create(body_tail2);
+            ReplaceInstWithInst(header1->getTerminator(), new_branch1);
+            body_head1->getTerminator()->replaceUsesOfWith(body_head1->getTerminator()->getSuccessor(1),body_head2->getTerminator()->getSuccessor(1));
+            body_tail1->getTerminator()->replaceUsesOfWith(latch2, latch1);
+        }else{
+            //guarded: es: br label %for.cond
+            body_tail1->getTerminator()->replaceUsesOfWith(latch1, body_head2);
+            body_tail2->getTerminator()->replaceUsesOfWith(latch2, latch1);
         }
-
-
-        body_tail1->getTerminator()->replaceUsesOfWith(latch1, body_head2);
-        body_tail2->getTerminator()->replaceUsesOfWith(latch2, latch1);
-
+         
         outs() << "L1 header: ";
         header1->print(outs());
         outs() << "\n";
