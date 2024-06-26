@@ -9,6 +9,12 @@ namespace {
         Loop* loop;
     };
 
+    void updateAnalysisInfo(Function &F, DominatorTree &DT, PostDominatorTree &PDT) {
+        // Ricalcolare il Dominator Tree e il Post Dominator Tree
+        DT.recalculate(F);
+        PDT.recalculate(F);
+    }
+
 
     void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, LoopInfo &LI, Function &F, DependenceInfo &DI, ScalarEvolution &SE, FunctionAnalysisManager &AM) {
         BasicBlock *l2_entry_block =  L2->getLoopPreheader();
@@ -20,15 +26,20 @@ namespace {
         PHINode *index1 = L1->getCanonicalInductionVariable();
         PHINode *index2 = L2->getCanonicalInductionVariable();
 
+
         if (!index1 || !index2)
         {
-            outs() << "Induction variables are not canonical\n";
-            return;
+            if (!index1 || !index2){
+                outs() << "Induction variables not found\n";
+                return;
+            }
+            
         }
 
         index2->replaceAllUsesWith(index1);
         index2->eraseFromParent();
 
+        updateAnalysisInfo(F, DT, PDT);
         
         /*  
         Get references to the basic blocks of the loops.
@@ -49,6 +60,12 @@ namespace {
                 break;
             }
         }
+        
+        if(!body_head1 && header1){
+            body_head1 = header1->getTerminator()->getSuccessor(0);
+        }
+
+        updateAnalysisInfo(F, DT, PDT);
 
         BasicBlock *body_head2 = nullptr;
         BasicBlock *body_tail2 = latch2->getUniquePredecessor();
@@ -62,41 +79,24 @@ namespace {
             }
         }
 
+       
+
+
+        outs()<<"L1 Header terminator: "<< *header1->getTerminator()<<"\n";
+        outs()<<"L2 Header terminator: "<< *header2->getTerminator()<<"\n";
+         
         if (!body_head1 || !body_tail1 || !body_head2 || !body_tail2)
         {
             outs() << "Failed to locate loop body blocks\n";
+            outs() << body_head1 <<"\n";
+            outs() << body_head2 <<"\n";
+            outs() << body_tail1 <<"\n";
+            outs() << body_tail2 <<"\n";
             return;
         }
 
-
-        L2->getExitBlocks(exits_blocks);
-        for (BasicBlock *BB : exits_blocks)
-        {
-            for (pred_iterator pit = pred_begin(BB); pit != pred_end(BB); pit++)
-            {
-                BasicBlock *predecessor = dyn_cast<BasicBlock>(*pit);
-                if (predecessor == header2)
-                {
-                    header1->getTerminator()->replaceUsesOfWith(l2_entry_block, BB);
-                }
-            }
-        }
-
+        updateAnalysisInfo(F, DT, PDT);
         
-        
-        if (latch1->getTerminator()->getNumSuccessors() == 2) {
-            //unguarded. es:  br i1 %cmp, label %do.body, label %do.end9
-            outs() << "ciao" << "\n";
-            BranchInst *new_branch1 = BranchInst::Create(body_tail2);
-            ReplaceInstWithInst(header1->getTerminator(), new_branch1);
-            body_head1->getTerminator()->replaceUsesOfWith(body_head1->getTerminator()->getSuccessor(1),body_head2->getTerminator()->getSuccessor(1));
-            body_tail1->getTerminator()->replaceUsesOfWith(latch2, latch1);
-        }else{
-            //guarded: es: br label %for.cond
-            body_tail1->getTerminator()->replaceUsesOfWith(latch1, body_head2);
-            body_tail2->getTerminator()->replaceUsesOfWith(latch2, latch1);
-        }
-         
         outs() << "L1 header: ";
         header1->print(outs());
         outs() << "\n";
@@ -128,16 +128,55 @@ namespace {
         outs() << "L2 body tail: ";
         body_tail2->print(outs());
         outs() << "\n";
-
-
-        outs()<<"L1 Header terminator: "<< *header1->getTerminator()<<"\n";
-        outs()<<"L2 Header terminator: "<< *header2->getTerminator()<<"\n";
+        
+        if (latch1->getTerminator()->getNumSuccessors() == 2) {
+            //unguarded. es:  br i1 %cmp, label %do.body, label %do.end9
+            BranchInst *new_branch1 = BranchInst::Create(body_tail2);
+            ReplaceInstWithInst(header1->getTerminator(), new_branch1);
+            body_head1->getTerminator()->replaceUsesOfWith(body_head1->getTerminator()->getSuccessor(1),body_head2->getTerminator()->getSuccessor(1));
+            header2->getTerminator()->replaceUsesOfWith(header2->getTerminator()->getSuccessor(0), body_head1);
+            body_tail1->getTerminator()->replaceUsesOfWith(latch2, latch1);
+        }else{
+            L2->getExitBlocks(exits_blocks);
+            for (BasicBlock *BB : exits_blocks)
+            {
+                for (pred_iterator pit = pred_begin(BB); pit != pred_end(BB); pit++)
+                {
+                    BasicBlock *predecessor = dyn_cast<BasicBlock>(*pit);
+                    if (predecessor == header2)
+                    {
+                        header1->getTerminator()->replaceUsesOfWith(l2_entry_block, BB);
+                    }
+                }
+            }
+            //guarded: es: br label %for.cond
+            body_tail1->getTerminator()->replaceUsesOfWith(latch1, body_head2);
+            body_tail2->getTerminator()->replaceUsesOfWith(latch2, latch1);
+        }
         
 
+
         
+        updateAnalysisInfo(F, DT, PDT);
+        
+        //delete unreachable blocks
         EliminateUnreachableBlocks(F);
 
-        
+        for (auto Iter = index1->use_begin(); Iter != index1->use_end();) {
+            Use &U = *Iter++;
+            if (Instruction *I = dyn_cast<Instruction>(U.getUser())) {
+                if (I->use_empty()) {
+                    //elimino istruzioni che utilizzano la induction variable ma che non sono utilizzate (come %inc6)
+                    I->eraseFromParent();
+                }else if(I->getOpcode() == Instruction::Add && I->getOperand(0) == index1 && isa<ConstantInt>(I->getOperand(1)) && latch1->getTerminator()->getNumSuccessors() == 2){
+                    //sposto alla fine del body di L2 le istruzioni che incrementano la Induction variable (come i++)
+                    //solo per i loop unguarded
+                    I->moveBefore(body_tail2->getTerminator());
+                }
+            }
+        }
+        updateAnalysisInfo(F, DT, PDT);
+
         outs() << "Deleted unreachable blocks\n";
     }
 
@@ -188,18 +227,43 @@ namespace {
             L1ExitingBlock->print(outs());
             outs() << "\n";
 
+            
+            
 
-            if (L1ExitingBlock && L2Preheader && L1ExitingBlock == L2Preheader) {
-                int instructionCount = 0;
-                for (Instruction &I : *L1ExitingBlock) {
-                    ++instructionCount;
-                    outs() << "Found instruction " << I << " inside the preheader \n";
+            if (L1ExitingBlock && L2Preheader){
+                if(L1ExitingBlock == L2Preheader){
+                    int instructionCount = 0;
+                    for (Instruction &I : *L1ExitingBlock) {
+                        ++instructionCount;
+                        outs() << "Found instruction " << I << " inside the preheader \n";
+                    }
+                    if (instructionCount == 1){
+                        outs() << "The exit block of L1 corresponds to the preheader of L2 \n";
+                        return true;
+                    }
+                    return false;
+                }else{
+                    outs() << "L1ExitingBlock->getTerminator() = ";
+                    L1ExitingBlock->getTerminator()->print(outs());
+                    outs() << "\n";
+
+                    outs() << "L1ExitingBlock->getTerminator()->getSuccessor(0) = ";
+                    L1ExitingBlock->getTerminator()->getSuccessor(0)->print(outs());
+                    outs() << "\n";
+
+                    outs() << "L1ExitingBlock->getTerminator()->getSuccessor(0)->getTerminator() = ";
+                    L1ExitingBlock->getTerminator()->getSuccessor(0)->getTerminator()->print(outs());
+                    outs() << "\n";
+
+                    outs() << "L1ExitingBlock->getTerminator()->getSuccessor(0)->getTerminator()->getSuccessor(1) = ";
+                    L1ExitingBlock->getTerminator()->getSuccessor(0)->getTerminator()->getSuccessor(1)->print(outs());
+                    outs() << "\n";
+
+                    if(L1ExitingBlock->getTerminator()->getSuccessor(0)->getTerminator()->getSuccessor(1) == L2Preheader){
+                        return true;
+                    }
+                    return false;
                 }
-                if (instructionCount == 1){
-                    outs() << "The exit block of L1 corresponds to the preheader of L2 \n";
-                    return true;
-                }
-                return false;
             }
 
             
@@ -438,16 +502,7 @@ namespace {
             if(fused && secondLoop) {
                 // Remove the loop from LoopInfo
                 LI.erase(secondLoop->loop);
-
-                // Remove the loop from the vector and free memory
-                auto it = std::remove_if(loops.begin(), loops.end(), [secondLoop](fusionCandidate* candidate) {
-                    if (candidate == secondLoop) {
-                        delete candidate; // Free memory
-                        return true; // Remove from vector
-                    }
-                    return false;
-                });
-                loops.erase(it, loops.end());
+                loops.erase(std::remove(loops.begin(), loops.end(), secondLoop), loops.end());
             } else {
                 break;
             }

@@ -10,4 +10,6 @@ void f(int *a, int *b, int *c, int *d, int n, int m) {
     for(int i=0; i<n; i++){
         c[i] = b[i];
     }
+
+    
 }
