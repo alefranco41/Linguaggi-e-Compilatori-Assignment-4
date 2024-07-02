@@ -14,9 +14,4 @@ void f(int *a, int *b, int *c, int *d, int n, int m) {
     b[j] = a[j];
     j++;
   }while(j<n);
-
-  /*do{
-    c[k] = 0;
-    k++;
-  }while(k<n);*/
 }

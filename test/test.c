@@ -11,5 +11,4 @@ void f(int *a, int *b, int *c, int *d, int n, int m) {
         c[i] = b[i];
     }
 
-    
-}
+}   
