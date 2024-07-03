@@ -42,7 +42,7 @@ test/%_mem2reg.ll: test/%_mem2reg.bc
 
 # Regola per applicare il passo di ottimizzazione loop-fuse su un file .ll
 test/%_optimized.ll: test/%_mem2reg.ll
-	opt -S -passes=loop-fuse $< -o $@
+	opt -S -passes=loop-fuse -print-after=loop-fuse $< -o $@
 
 # Pulizia dei file generati
 .PHONY: clean
