@@ -72,7 +72,6 @@ void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, Lo
         }
     }
 
-
     //link loop bodies
     if (L1_latch->getTerminator()->getNumSuccessors() == 1) {
         //guarded loops, the latch has 1 successor: br label %for.inc
@@ -102,8 +101,6 @@ void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, Lo
         L2_body_start->getTerminator()->replaceUsesOfWith(L2_header, L1_header);
     }
     
-
-
     //link L2 body to L1 latch
     BranchInst *jump_to_L1_latch = BranchInst::Create(L1_latch);
     ReplaceInstWithInst(L2_body_end->getTerminator(), jump_to_L1_latch);
@@ -111,7 +108,6 @@ void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, Lo
     //link L2 header to L2 latch
     BranchInst *jump_to_L2_latch = BranchInst::Create(L2_latch);
     ReplaceInstWithInst(L2_header->getTerminator(), jump_to_L2_latch);
-    
     
 
     //delete unreachable blocks
@@ -121,8 +117,6 @@ void fuseLoops(Loop *L1, Loop *L2, DominatorTree &DT, PostDominatorTree &PDT, Lo
     //update analysis info after the change
     updateAnalysisInfo(F, DT, PDT);
 
-
-    
     outs() << "Deleted unreachable blocks\n";
 }
 
@@ -199,21 +193,12 @@ bool areLoopsAdjacent(Loop *L1, Loop *L2) {
 bool controlFlowEquivalent(Loop* L1, Loop* L2, DominatorTree &DT, PostDominatorTree &PDT){
     return (DT.dominates(L1->getHeader(), L2->getHeader()) && PDT.dominates(L2->getHeader(), L1->getHeader()));
 }
+
 // Returns a polynomial recurrence on the trip count of a load/store instruction
 const SCEVAddRecExpr* getSCEVAddRec(Instruction *I, Loop *L, ScalarEvolution &SE) {
     SmallPtrSet<const SCEVPredicate *, 4> preds;
     const SCEV *Instruction_SCEV = SE.getSCEVAtScope(getLoadStorePointerOperand(I), L);
-
-    outs() << "Instruction: " << *I << "\n";
-    Instruction_SCEV->print(outs());
-    outs() << "\n";
-
     const SCEVAddRecExpr *rec = SE.convertSCEVToAddRecWithPredicates(Instruction_SCEV, L, preds);
-    if(rec){
-        rec->print(outs());
-        outs() << "\n";
-    }
-
     return rec;
 }
 
@@ -344,7 +329,6 @@ bool dependencesAllowFusion(Loop *L0, Loop *L1, DominatorTree &DT, ScalarEvoluti
 
 
 bool tryFuseLoops(fusionCandidate *C1, fusionCandidate *C2, ScalarEvolution &SE, DominatorTree &DT, PostDominatorTree &PDT, DependenceInfo &DI, LoopInfo &LI, Function &F, FunctionAnalysisManager &AM) {
-    
     Loop* L1 = C1->loop;
     Loop* L2 = C2->loop;
 
