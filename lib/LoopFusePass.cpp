@@ -194,82 +194,112 @@ bool controlFlowEquivalent(Loop* L1, Loop* L2, DominatorTree &DT, PostDominatorT
     return (DT.dominates(L1->getHeader(), L2->getHeader()) && PDT.dominates(L2->getHeader(), L1->getHeader()));
 }
 
-// Returns a polynomial recurrence on the trip count of a load/store instruction
+//returns a polynomial recurrence on the trip count of a load/store instruction
 const SCEVAddRecExpr* getSCEVAddRec(Instruction *I, Loop *L, ScalarEvolution &SE) {
     SmallPtrSet<const SCEVPredicate *, 4> preds;
+    //SCEV representation of the pointer operand of the load/store instruction inside the scope of the loop
     const SCEV *Instruction_SCEV = SE.getSCEVAtScope(getLoadStorePointerOperand(I), L);
+    //convert the SCEV instruction to a polynomial recurrence on the trip count of the specified loop
     const SCEVAddRecExpr *rec = SE.convertSCEVToAddRecWithPredicates(Instruction_SCEV, L, preds);
     return rec;
 }
 
 bool isDistanceNegative(Loop *loop1, Loop *loop2, Instruction *inst1, Instruction *inst2, ScalarEvolution &SE) {   
-    // Get polynomial recurrences for inst1 and inst2
+    oute() << "Checking if the access distance between " << inst1 << " and " << inst2 << " is negative\n";
+    //get polynomial recurrences on the trip count for the dependend instructions
     const SCEVAddRecExpr *inst1_add_rec = getSCEVAddRec(inst1, loop1, SE);
     const SCEVAddRecExpr *inst2_add_rec = getSCEVAddRec(inst2, loop2, SE);
 
-    
-    // Check if both polynomial recurrences were found
+    //check if both polynomial recurrences were found
     if (!(inst1_add_rec && inst2_add_rec)) {
         outs() << "Can't find a polynomial recurrence for inst!\n";
         return false;
     }
 
-    // Ensure both instructions share the same pointer base
+    outs() << "Polynomial recurrence of " << inst1 << ": " << inst1_add_rec << "\n";
+    outs() << "Pointer base of " << inst1_add_rec << ": " << SE.getPointerBase(inst1_add_rec) << "\n";
+
+    //if the instructions don't share the same pointer base, then the dependence is not negative
     if (SE.getPointerBase(inst1_add_rec) != SE.getPointerBase(inst2_add_rec)) {
         outs() << "Different pointer base\n";
         return false;
     }
 
-    // Extract the start and stride of the polynomial recurrences
+    outs() << "Polynomial recurrence of " << inst2 << ": " << inst2_add_rec << "\n";
+    outs() << "Pointer base of " << inst2_add_rec << ": " << SE.getPointerBase(inst2_add_rec) << "\n";
+
+    //extract the start addresses of the polynomial recurrences
+    //address value at the start of the loop.
     const SCEV* start_first_inst = inst1_add_rec->getStart();
     const SCEV* start_second_inst = inst2_add_rec->getStart();
+    
+    outs() << "Start index of " << inst1_add_rec << ": " << start_first_inst << "\n";
+    outs() << "Start index of " << inst2_add_rec << ": " << start_second_inst << "\n";
+
+    //extract the stride of the polynomial recurrences
+    //change of the address at each loop iteration
     const SCEV* stride_first_inst = inst1_add_rec->getStepRecurrence(SE);
     const SCEV* stride_second_inst = inst2_add_rec->getStepRecurrence(SE);
 
-    // Ensure the stride is non-zero and both strides are equal
+    outs() << "Stride of " << inst1_add_rec << ": " << stride_first_inst << "\n";
+    outs() << "Stride of " << inst2_add_rec << ": " << stride_second_inst << "\n";
+
+    //ensure the stride is non-zero and both strides are equal
     if (!SE.isKnownNonZero(stride_first_inst) || stride_first_inst != stride_second_inst) {
         outs() << "Cannot compute distance\n";
         return true;
     }
 
-    // Compute the distance (delta) between the start addresses
+    //compute the distance (delta) between the start addresses
     const SCEV *inst_delta = SE.getMinusSCEV(start_first_inst, start_second_inst);
-    const SCEV *dependence_dist = nullptr;
+    outs() << "Delta: " << inst_delta << "\n";
+
+    //cast the delta and the stride to SCEVConstant
     const SCEVConstant *const_delta = dyn_cast<SCEVConstant>(inst_delta);
     const SCEVConstant *const_stride = dyn_cast<SCEVConstant>(stride_first_inst);
 
     if (const_delta && const_stride) {
+        //retrieve the integer value of the delta and the stride
         APInt int_stride = const_stride->getAPInt();
         APInt int_delta = const_delta->getAPInt();
+    
+        //check if |delta| % |stride| != 0 
+        if ((int_delta != 0 && int_delta.abs().urem(int_stride.abs()) != 0)){
+            //delta is not multiple of the stride
+            outs() << "|delta|: " << int_delta.abs() << " not multiple of |stride|: " << int_stride.abs() << "\n";
+            return false;
+        }
+            
+        //create APInt with value 0 and the number of bits of the stride
         unsigned n_bits = int_stride.getBitWidth();
         APInt int_zero = APInt(n_bits, 0);
 
-        // Check if the stride is zero (indicating a constant address)
-        if (int_stride == 0)
-            return true;
-
-        // Check if the delta is a multiple of the stride
-        if ((int_delta != 0 && int_delta.abs().urem(int_stride.abs()) != 0))
-            return false;
-
-        // Reverse the delta if the stride is negative
-        bool reverse_delta = false;
-        if (int_stride.slt(int_zero))
-            reverse_delta = true;
-
-        dependence_dist = reverse_delta ? SE.getNegativeSCEV(inst_delta) : inst_delta;
+        //reverse the delta if the stride is negative
+        const SCEV *dependence_dist = nullptr;
+        if(int_stride.slt(int_zero)){
+            dependence_dist = SE.getNegativeSCEV(inst_delta);
+        }else{
+            dependence_dist = inst_delta;
+        }
+            
     } else {
         outs() << "Cannot compute distance\n";
         return true;
     }
 
-    // Check if the dependence distance is negative
+    //check if the dependence distance is negative
     bool isDistanceNegative = SE.isKnownPredicate(ICmpInst::ICMP_SLT, dependence_dist, SE.getZero(stride_first_inst->getType()));
-
+    if(isDistanceNegative){
+        outs() << inst1 << " and " << inst2 << " are dependent with a negative distance \n";
+    }else{
+        outs() << inst1 << " and " << inst2 << " are dependent with a NON-negative distance \n";
+    }
+    
+    outs() << "\n";
     return isDistanceNegative;
 }
 
-
+//check if all the dependencies between the two loops are non-negative
 bool dependencesAllowFusion(Loop *L0, Loop *L1, DominatorTree &DT, ScalarEvolution &SE, DependenceInfo &DI) {
     std::vector<Instruction*> L0MemReads;
     std::vector<Instruction*> L0MemWrites;
@@ -277,6 +307,7 @@ bool dependencesAllowFusion(Loop *L0, Loop *L1, DominatorTree &DT, ScalarEvoluti
     std::vector<Instruction*> L1MemReads;
     std::vector<Instruction*> L1MemWrites;
 
+    //collect load and store instructions of L0
     for (BasicBlock *BB : L0->blocks()) {        
         for (Instruction &I : *BB) {
             if (I.mayWriteToMemory()){
@@ -285,11 +316,11 @@ bool dependencesAllowFusion(Loop *L0, Loop *L1, DominatorTree &DT, ScalarEvoluti
 
             if (I.mayReadFromMemory()){
                 L0MemReads.push_back(&I);
-            }
-            
+            } 
         }
     }
 
+    //collect load and store instructions of L1
     for (BasicBlock *BB : L1->blocks()) {        
         for (Instruction &I : *BB) {
             if (I.mayWriteToMemory()){
@@ -299,31 +330,28 @@ bool dependencesAllowFusion(Loop *L0, Loop *L1, DominatorTree &DT, ScalarEvoluti
             if (I.mayReadFromMemory()){
                 L1MemReads.push_back(&I);
             }
-            
         }
     }
 
-
+    //check for any negative distance dependency between the store instructions of L0 and the load instructions of L1
     for (Instruction *WriteL0 : L0MemWrites) { 
         for (Instruction *ReadL1 : L1MemReads){
-            if(auto instruction_dependence = DI.depends(WriteL0, ReadL1, true)){
-                if (isDistanceNegative(L0, L1, WriteL0, ReadL1, SE)) {
-                    return false;
-                }
+            if(DI.depends(WriteL0, ReadL1, true) && isDistanceNegative(L0, L1, WriteL0, ReadL1, SE)){
+                return false;
             }
         }     
     }
 
+    //check for any negative distance dependency between the store instructions of L1 and the load instructions of L0
     for (Instruction *WriteL1 : L1MemWrites) {        
         for (Instruction *ReadL0 : L0MemReads){
-            if(auto instruction_dependence = DI.depends(WriteL1, ReadL0, true)){
-                if (isDistanceNegative(L0, L1, ReadL0, WriteL1, SE)) {
-                    return false;
-                }
+            if(DI.depends(WriteL1, ReadL0, true) && isDistanceNegative(L0, L1, ReadL0, WriteL1, SE)){
+                return false;
             }
         }  
     }
-        
+    
+    //if we reach this point, all the dependencies are non-negative
     return true;
 }
 
