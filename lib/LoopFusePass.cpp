@@ -205,9 +205,9 @@ const SCEVAddRecExpr* getSCEVAddRec(Instruction *I, Loop *L, ScalarEvolution &SE
 }
 
 bool isDistanceNegative(Loop *loop1, Loop *loop2, Instruction *inst1, Instruction *inst2, ScalarEvolution &SE) {   
-    oute() << "Checking if the access distance between " << inst1 << " and " << inst2 << " is negative\n";
+    outs() << "Checking if the access distance between " << *inst1 << " and " << *inst2 << " is negative\n";
     //get polynomial recurrences on the trip count for the dependend instructions
-    const SCEVAddRecExpr *inst1_add_rec = getSCEVAddRec(inst1, loop1, SE);
+    const SCEVAddRecExpr *inst1_add_rec = getSCEVAddRec(inst1, loop1, SE); //es: {%a,+,4}<nw><%for.cond>
     const SCEVAddRecExpr *inst2_add_rec = getSCEVAddRec(inst2, loop2, SE);
 
     //check if both polynomial recurrences were found
@@ -216,33 +216,66 @@ bool isDistanceNegative(Loop *loop1, Loop *loop2, Instruction *inst1, Instructio
         return false;
     }
 
-    outs() << "Polynomial recurrence of " << inst1 << ": " << inst1_add_rec << "\n";
-    outs() << "Pointer base of " << inst1_add_rec << ": " << SE.getPointerBase(inst1_add_rec) << "\n";
+    outs() << "Polynomial recurrence of " << *inst1 << ": ";
+    inst1_add_rec->print(outs());
+    outs()  << "\n";
 
-    //if the instructions don't share the same pointer base, then the dependence is not negative
-    if (SE.getPointerBase(inst1_add_rec) != SE.getPointerBase(inst2_add_rec)) {
+    outs() << "Pointer base of ";
+    inst1_add_rec->print(outs());
+    outs() << ": ";
+    SE.getPointerBase(inst1_add_rec)->print(outs());
+    outs() << "\n";
+    
+
+    outs() << "Polynomial recurrence of " << *inst2 << ": ";
+    inst2_add_rec->print(outs());
+    outs()  << "\n";
+
+    outs() << "Pointer base of ";
+    inst2_add_rec->print(outs());
+    outs() << ": ";
+    SE.getPointerBase(inst2_add_rec)->print(outs());
+    outs() << "\n";
+
+    //if the instructions don't share the same pointer base, then the dependence is not negative 
+    if (SE.getPointerBase(inst1_add_rec) != SE.getPointerBase(inst2_add_rec)) { //es: %a != %b
         outs() << "Different pointer base\n";
         return false;
     }
 
-    outs() << "Polynomial recurrence of " << inst2 << ": " << inst2_add_rec << "\n";
-    outs() << "Pointer base of " << inst2_add_rec << ": " << SE.getPointerBase(inst2_add_rec) << "\n";
-
     //extract the start addresses of the polynomial recurrences
     //address value at the start of the loop.
-    const SCEV* start_first_inst = inst1_add_rec->getStart();
+    const SCEV* start_first_inst = inst1_add_rec->getStart(); //es: %a
     const SCEV* start_second_inst = inst2_add_rec->getStart();
     
-    outs() << "Start index of " << inst1_add_rec << ": " << start_first_inst << "\n";
-    outs() << "Start index of " << inst2_add_rec << ": " << start_second_inst << "\n";
+    outs() << "Start index of ";
+    inst1_add_rec->print(outs());
+    outs() << ": ";
+    start_first_inst->print(outs());
+    outs() << "\n";
+
+    outs() << "Start index of ";
+    inst2_add_rec->print(outs());
+    outs() << ": ";
+    start_second_inst->print(outs());
+    outs() << "\n";
 
     //extract the stride of the polynomial recurrences
     //change of the address at each loop iteration
-    const SCEV* stride_first_inst = inst1_add_rec->getStepRecurrence(SE);
+    const SCEV* stride_first_inst = inst1_add_rec->getStepRecurrence(SE); //es: 4
     const SCEV* stride_second_inst = inst2_add_rec->getStepRecurrence(SE);
 
-    outs() << "Stride of " << inst1_add_rec << ": " << stride_first_inst << "\n";
-    outs() << "Stride of " << inst2_add_rec << ": " << stride_second_inst << "\n";
+    outs() << "Stride index of ";
+    inst1_add_rec->print(outs());
+    outs() << ": ";
+    stride_first_inst->print(outs());
+    outs() << "\n";
+
+    outs() << "Stride index of ";
+    inst2_add_rec->print(outs());
+    outs() << ": ";
+    stride_second_inst->print(outs());
+    outs() << "\n";
 
     //ensure the stride is non-zero and both strides are equal
     if (!SE.isKnownNonZero(stride_first_inst) || stride_first_inst != stride_second_inst) {
@@ -252,11 +285,15 @@ bool isDistanceNegative(Loop *loop1, Loop *loop2, Instruction *inst1, Instructio
 
     //compute the distance (delta) between the start addresses
     const SCEV *inst_delta = SE.getMinusSCEV(start_first_inst, start_second_inst);
-    outs() << "Delta: " << inst_delta << "\n";
+    
+    outs() << "Delta: ";
+    inst_delta->print(outs());
+    outs() << "\n";
 
     //cast the delta and the stride to SCEVConstant
     const SCEVConstant *const_delta = dyn_cast<SCEVConstant>(inst_delta);
     const SCEVConstant *const_stride = dyn_cast<SCEVConstant>(stride_first_inst);
+    const SCEV *dependence_dist = nullptr;
 
     if (const_delta && const_stride) {
         //retrieve the integer value of the delta and the stride
@@ -266,7 +303,12 @@ bool isDistanceNegative(Loop *loop1, Loop *loop2, Instruction *inst1, Instructio
         //check if |delta| % |stride| != 0 
         if ((int_delta != 0 && int_delta.abs().urem(int_stride.abs()) != 0)){
             //delta is not multiple of the stride
-            outs() << "|delta|: " << int_delta.abs() << " not multiple of |stride|: " << int_stride.abs() << "\n";
+            outs() << "|delta|: ";
+            int_delta.abs().print(outs(), false);
+            outs() << " not multiple of |stride|: ";
+            int_stride.abs().print(outs(), false);
+            outs() << "\n";
+
             return false;
         }
             
@@ -275,7 +317,6 @@ bool isDistanceNegative(Loop *loop1, Loop *loop2, Instruction *inst1, Instructio
         APInt int_zero = APInt(n_bits, 0);
 
         //reverse the delta if the stride is negative
-        const SCEV *dependence_dist = nullptr;
         if(int_stride.slt(int_zero)){
             dependence_dist = SE.getNegativeSCEV(inst_delta);
         }else{
@@ -290,9 +331,9 @@ bool isDistanceNegative(Loop *loop1, Loop *loop2, Instruction *inst1, Instructio
     //check if the dependence distance is negative
     bool isDistanceNegative = SE.isKnownPredicate(ICmpInst::ICMP_SLT, dependence_dist, SE.getZero(stride_first_inst->getType()));
     if(isDistanceNegative){
-        outs() << inst1 << " and " << inst2 << " are dependent with a negative distance \n";
+        outs() << *inst1 << " and " << *inst2 << " are dependent with a negative distance \n";
     }else{
-        outs() << inst1 << " and " << inst2 << " are dependent with a NON-negative distance \n";
+        outs() << *inst1 << " and " << *inst2 << " are dependent with a NON-negative distance \n";
     }
     
     outs() << "\n";
